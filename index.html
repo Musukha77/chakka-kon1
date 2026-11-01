@@ -39,7 +39,7 @@ let room="",pid="",pname="",state=null,peer=null,stream=null,calls=[],muted=fals
 const $=id=>document.getElementById(id);
 // On Render, the page and API share a domain. On Netlify, set the URL below
 // to your Render service URL after deployment.
-const RENDER_API_BASE = "https://YOUR-RENDER-SERVICE.onrender.com";
+const RENDER_API_BASE = "https://chakka-kon1.onrender.com";
 const API_BASE = location.hostname.endsWith("onrender.com") ? "" : RENDER_API_BASE;
 async function api(path,data={}){
   let r=await fetch(API_BASE+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...data,room,pid,name:pname})});
