@@ -1,0 +1,75 @@
+
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CHAKKA KON</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#100b1f;color:#fff;font-family:Arial,sans-serif}
+main{max-width:900px;margin:auto;padding:18px}.panel{background:#211735;border:1px solid #493461;border-radius:16px;padding:16px;margin:12px 0}
+h1{color:#e8b7ff;margin-bottom:4px}button,input,select{padding:10px;border-radius:9px;border:0;margin:4px}
+button{background:#d946ef;color:white;font-weight:bold;cursor:pointer}button:disabled{opacity:.4}
+input{max-width:100%;background:#fff;color:#111}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+#players button{display:block;width:100%;text-align:left;background:#38294d}#chatlog{height:190px;overflow:auto;background:#140e20;padding:10px;border-radius:10px}
+#status{color:#facc15;font-weight:bold}.small{font-size:13px;color:#cbbbdc}
+@media(max-width:650px){.grid{grid-template-columns:1fr}main{padding:10px}}
+</style></head><body><main>
+<h1>🃏 CHAKKA KON</h1><p>5 players • hidden Chakka • 10-second voting rounds</p>
+<div class="panel" id="setup">
+<input id="name" placeholder="Your nickname" maxlength="20">
+<button onclick="createRoom()">Create room</button>
+<input id="roomcode" placeholder="Room code" maxlength="8">
+<button onclick="joinRoom()">Join room</button>
+<p id="setupmsg"></p></div>
+<div id="game" style="display:none">
+<div class="panel"><b>Room:</b> <span id="code"></span> &nbsp; <b>Phase:</b> <span id="phase"></span>
+<p id="status"></p><p id="role"></p><p id="timer"></p></div>
+<div class="grid">
+<div class="panel"><h3>👥 Players</h3><div id="players"></div><p id="hostcontrols"></p></div>
+<div class="panel"><h3>💬 Room Chat</h3><div id="chatlog"></div><input id="chatmsg" placeholder="Type message" maxlength="300"><button onclick="sendChat()">Send</button></div>
+</div>
+<div class="panel"><h3>🗳️ Vote</h3><div id="votes"></div><p class="small">You can vote once each round. Voting lasts 10 seconds.</p></div>
+<div class="panel"><h3>🎙️ Voice Chat</h3>
+<button onclick="startVoice()">Start microphone</button><button id="mute" onclick="toggleMute()" disabled>Mute</button>
+<p id="vstatus">Start voice to get your Voice ID.</p><input id="myvoice" readonly placeholder="Your Voice ID">
+<button onclick="copyVoice()">Copy ID</button><input id="friendvoice" placeholder="Friend's Voice ID"><button onclick="callFriend()">Connect</button>
+<div id="audios"></div><p class="small">Voice is optional. Share IDs only with players in your room. Peer connections may depend on network/NAT.</p></div>
+<div class="panel"><button onclick="refresh()">Refresh game</button><button onclick="leaveGame()">Leave local game view</button></div>
+</div></main>
+<script>
+let room="",pid="",pname="",state=null,peer=null,stream=null,calls=[],muted=false;
+const $=id=>document.getElementById(id);
+// On Render, the page and API share a domain. On Netlify, set the URL below
+// to your Render service URL after deployment.
+const RENDER_API_BASE = "https://YOUR-RENDER-SERVICE.onrender.com";
+const API_BASE = location.hostname.endsWith("onrender.com") ? "" : RENDER_API_BASE;
+async function api(path,data={}){
+  let r=await fetch(API_BASE+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...data,room,pid,name:pname})});
+  let j=await r.json().catch(()=>({error:"Server returned an unreadable response"}));
+  if(!r.ok)throw Error(j.error||"Request failed");
+  return j;
+}
+function showGame(){ $("setup").style.display="none";$("game").style.display="block";$("code").textContent=room;}
+async function createRoom(){pname=$("name").value.trim();if(!pname)return alert("Enter nickname");try{let j=await api("/api/create",{name:pname});room=j.room;pid=j.pid;showGame();refresh()}catch(e){$("setupmsg").textContent=e.message}}
+async function joinRoom(){pname=$("name").value.trim();room=$("roomcode").value.trim().toUpperCase();if(!pname||!room)return alert("Enter nickname and room code");try{let j=await api("/api/join",{name:pname});pid=j.pid;showGame();refresh()}catch(e){$("setupmsg").textContent=e.message}}
+async function refresh(){if(!room||!pid)return;try{state=await api("/api/state");render()}catch(e){$("status").textContent=e.message}}
+function render(){if(!state)return;$("phase").textContent=state.phase;$("status").textContent=state.message||"";$("role").textContent=state.role?("Your secret role: "+state.role+(state.word?" • Word: "+state.word:"")):"";
+$("timer").textContent=state.phase==="voting"?"Voting closes in "+state.remaining+" seconds":"";
+$("players").innerHTML=state.players.map(p=>`<div>${esc(p.name)} ${p.alive?"🟢":"☠️"} ${p.host?"👑 Host":""} ${p.ready?"✓":""}</div>`).join("");
+$("hostcontrols").innerHTML=state.host&&state.phase==="lobby"?'<button onclick="startGame()">Start game (5 players)</button>':state.host&&state.phase==="discussion"?'<button onclick="beginVote()">Start 10-second vote</button>':"";
+$("votes").innerHTML=state.phase==="voting"?state.players.filter(p=>p.alive&&p.pid!==pid).map(p=>`<button onclick="vote('${p.pid}')">Vote ${esc(p.name)}</button>`).join(""):"";
+$("chatlog").innerHTML=state.chat.map(m=>`<div><b>${esc(m.name)}:</b> ${esc(m.text)}</div>`).join("");$("chatlog").scrollTop=$("chatlog").scrollHeight;
+}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+async function startGame(){try{await api("/api/start");refresh()}catch(e){alert(e.message)}}
+async function beginVote(){try{await api("/api/open-voting");refresh()}catch(e){alert(e.message)}}
+async function vote(target){try{await api("/api/vote",{target});refresh()}catch(e){alert(e.message)}}
+async function sendChat(){let text=$("chatmsg").value.trim();if(!text)return;try{await api("/api/chat",{text});$("chatmsg").value="";refresh()}catch(e){alert(e.message)}}
+$("chatmsg").addEventListener("keydown",e=>{if(e.key==="Enter")sendChat()});
+function leaveGame(){room="";pid="";state=null;$("game").style.display="none";$("setup").style.display="block";stopVoice()}
+setInterval(refresh,1200);
+async function startVoice(){try{stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});peer=new Peer();peer.on("open",id=>{$("myvoice").value=id;$("vstatus").textContent="Mic ready. Share your ID with room players.";$("mute").disabled=false});peer.on("call",call=>{call.answer(stream);handleCall(call)});peer.on("error",e=>$("vstatus").textContent="Voice error: "+e.type)}catch(e){$("vstatus").textContent="Mic permission denied or unavailable."}}
+function handleCall(call){if(calls.includes(call))return;calls.push(call);call.on("stream",s=>{let a=document.createElement("audio");a.autoplay=true;a.playsInline=true;a.srcObject=s;$("audios").appendChild(a);a.play().catch(()=>{})});call.on("close",()=>calls=calls.filter(c=>c!==call))}
+function callFriend(){if(!peer||!stream)return alert("Start microphone first");let id=$("friendvoice").value.trim();if(!id)return alert("Enter friend's Voice ID");if(id===peer.id)return alert("That is your own ID");let call=peer.call(id,stream);if(call)handleCall(call)}
+function toggleMute(){muted=!muted;stream?.getAudioTracks().forEach(t=>t.enabled=!muted);$("mute").textContent=muted?"Unmute":"Mute"}
+async function copyVoice(){if($("myvoice").value)await navigator.clipboard.writeText($("myvoice").value)}
+function stopVoice(){calls.forEach(c=>c.close());calls=[];peer?.destroy();stream?.getTracks().forEach(t=>t.stop());peer=null;stream=null}
+</script></body></html>
